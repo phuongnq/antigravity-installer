@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Standalone Google Antigravity 2.0 (Hub) & Antigravity IDE Installer for Linux x64
+# Standalone Google Antigravity 2.0 (Hub) & Antigravity IDE Installer for Linux
 # ==============================================================================
 #
 # Supports:
-#   - Full Installation & Upgrades
+#   - Automatic discovery of latest releases from https://antigravity.google/download
+#   - Full Installation & Upgrades on Linux x64 and ARM64
 #   - Component selection (--hub-only, --ide-only)
 #   - Version checks (--check)
 #   - Clean Uninstallation (--uninstall)
@@ -14,14 +15,43 @@
 
 set -euo pipefail
 
-# ------------------------------------------------------------------------------
-# Default Version URLs & Configuration
-# ------------------------------------------------------------------------------
-DEFAULT_HUB_URL="https://storage.googleapis.com/antigravity-public/antigravity-hub/2.8.1-6512087774658560/linux-x64/Antigravity.tar.gz"
-DEFAULT_IDE_URL="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.5.5-4923483625488384/linux-x64/Antigravity%20IDE.tar.gz"
+ORIG_ARGS=("$@")
 
-HUB_URL="${ANTIGRAVITY_HUB_URL:-$DEFAULT_HUB_URL}"
-IDE_URL="${ANTIGRAVITY_IDE_URL:-$DEFAULT_IDE_URL}"
+# ------------------------------------------------------------------------------
+# Architecture & Version Configuration
+# ------------------------------------------------------------------------------
+detect_arch_tag() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64|amd64)
+      echo "linux-x64"
+      ;;
+    aarch64|arm64)
+      echo "linux-arm"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
+ARCH_TAG="$(detect_arch_tag)"
+
+# Built-in fallback URLs
+DEFAULT_HUB_URL_X64="https://storage.googleapis.com/antigravity-public/antigravity-hub/2.8.1-6512087774658560/linux-x64/Antigravity.tar.gz"
+DEFAULT_IDE_URL_X64="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.5.5-4923483625488384/linux-x64/Antigravity%20IDE.tar.gz"
+
+DEFAULT_HUB_URL_ARM="https://storage.googleapis.com/antigravity-public/antigravity-hub/2.8.1-6512087774658560/linux-arm/Antigravity.tar.gz"
+DEFAULT_IDE_URL_ARM="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.5.5-4923483625488384/linux-arm/Antigravity%20IDE.tar.gz"
+
+if [ "${ARCH_TAG}" = "linux-arm" ]; then
+  DEFAULT_HUB_URL="${DEFAULT_HUB_URL_ARM}"
+  DEFAULT_IDE_URL="${DEFAULT_IDE_URL_ARM}"
+else
+  DEFAULT_HUB_URL="${DEFAULT_HUB_URL_X64}"
+  DEFAULT_IDE_URL="${DEFAULT_IDE_URL_X64}"
+fi
 
 INSTALL_DIR="${ANTIGRAVITY_INSTALL_DIR:-/opt/antigravity}"
 BIN_DIR="${ANTIGRAVITY_BIN_DIR:-/usr/local/bin}"
@@ -43,6 +73,83 @@ log_error() { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
 log_step()  { echo -e "\n${BOLD}${CYAN}==>${RESET} ${BOLD}$*${RESET}"; }
 
 # ------------------------------------------------------------------------------
+# Dynamic Release Resolution from https://antigravity.google/download
+# ------------------------------------------------------------------------------
+
+fetch_live_urls() {
+  local target_arch="$1"
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  python3 - "${target_arch}" << 'PYEOF' 2>/dev/null || return 1
+import urllib.request, re, gzip, sys
+
+target_arch = sys.argv[1]
+url = 'https://antigravity.google/download'
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux)', 'Accept-Encoding': 'gzip'})
+
+try:
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = resp.read()
+        if resp.info().get('Content-Encoding') == 'gzip':
+            data = gzip.decompress(data)
+        html = data.decode('utf-8', errors='ignore')
+except Exception:
+    sys.exit(1)
+
+hub_url = ""
+ide_url = ""
+
+hub_section = re.search(r'<section[^>]*id=[\"\']antigravity-2[\"\'][^>]*>(.*?)</section>', html, re.DOTALL)
+if hub_section:
+    m = re.search(r'href=[\"\'](https?://[^\"]+/' + target_arch + r'/[^\"]+)[\"\']', hub_section.group(1))
+    if m:
+        hub_url = m.group(1)
+
+ide_section = re.search(r'<section[^>]*id=[\"\']antigravity-ide[\"\'][^>]*>(.*?)</section>', html, re.DOTALL)
+if ide_section:
+    m = re.search(r'href=[\"\'](https?://[^\"]+/' + target_arch + r'/[^\"]+)[\"\']', ide_section.group(1))
+    if m:
+        ide_url = m.group(1)
+
+if hub_url or ide_url:
+    print(f"HUB={hub_url}")
+    print(f"IDE={ide_url}")
+    sys.exit(0)
+sys.exit(1)
+PYEOF
+}
+
+resolve_urls() {
+  if [ -n "${ANTIGRAVITY_HUB_URL:-}" ] && [ -n "${ANTIGRAVITY_IDE_URL:-}" ]; then
+    HUB_URL="${ANTIGRAVITY_HUB_URL}"
+    IDE_URL="${ANTIGRAVITY_IDE_URL}"
+    URL_SOURCE="Custom environment variables"
+    return 0
+  fi
+
+  local live_output
+  live_output=$(fetch_live_urls "${ARCH_TAG}") || true
+
+  local live_hub=""
+  local live_ide=""
+  if [ -n "${live_output}" ]; then
+    live_hub=$(echo "${live_output}" | grep '^HUB=' | cut -d= -f2-)
+    live_ide=$(echo "${live_output}" | grep '^IDE=' | cut -d= -f2-)
+  fi
+
+  if [ -n "${live_hub}" ] || [ -n "${live_ide}" ]; then
+    URL_SOURCE="Live from https://antigravity.google/download"
+  else
+    URL_SOURCE="Built-in default URLs"
+  fi
+
+  HUB_URL="${ANTIGRAVITY_HUB_URL:-${live_hub:-$DEFAULT_HUB_URL}}"
+  IDE_URL="${ANTIGRAVITY_IDE_URL:-${live_ide:-$DEFAULT_IDE_URL}}"
+}
+
+# ------------------------------------------------------------------------------
 # Helper Functions
 # ------------------------------------------------------------------------------
 
@@ -56,7 +163,7 @@ show_help() {
   echo -e "  -u, --update        Update/upgrade existing Antigravity installation"
   echo -e "      --hub-only      Install or update only Antigravity Hub (2.0)"
   echo -e "      --ide-only      Install or update only Antigravity IDE"
-  echo -e "  -c, --check         Display installed versions vs available installer versions"
+  echo -e "  -c, --check         Display installed versions vs latest available versions"
   echo -e "      --uninstall     Completely remove Antigravity Hub, IDE, symlinks, and launchers"
   echo -e "  -f, --force         Bypass running process and architecture warnings"
   echo -e "  -h, --help          Show this help message"
@@ -74,8 +181,6 @@ show_help() {
   echo -e "  sudo ./install_antigravity.sh --uninstall    # Clean uninstallation"
 }
 
-ORIG_ARGS=("$@")
-
 check_root() {
   if [ "$EUID" -ne 0 ]; then
     log_error "This operation requires administrative privileges."
@@ -89,19 +194,16 @@ check_root() {
 }
 
 check_architecture() {
-  local arch
-  arch="$(uname -m)"
-  case "${arch}" in
-    x86_64|amd64)
+  case "${ARCH_TAG}" in
+    linux-x64|linux-arm)
       # Supported
       ;;
     *)
       if [ -z "${ANTIGRAVITY_HUB_URL:-}" ] && [ -z "${ANTIGRAVITY_IDE_URL:-}" ]; then
-        log_warn "Detected architecture: ${arch}."
-        log_warn "Default pre-compiled packages are built for Linux x64 (x86_64)."
-        log_warn "If you have custom package URLs for your architecture, provide ANTIGRAVITY_HUB_URL / ANTIGRAVITY_IDE_URL."
+        log_warn "Detected unknown architecture: $(uname -m)."
+        log_warn "Official packages support linux-x64 (x86_64) and linux-arm (arm64/aarch64)."
         if [ "${FORCE_FLAG}" -ne 1 ]; then
-          log_error "Aborting. Re-run with --force if you wish to proceed anyway."
+          log_error "Aborting. Re-run with --force if you have custom compatible packages."
           exit 1
         fi
       fi
@@ -260,15 +362,16 @@ PYEOF
 }
 
 show_status() {
-  echo -e "\n${BOLD}Antigravity Installation Status:${RESET}"
+  resolve_urls
+  echo -e "\n${BOLD}Antigravity Installation Status (${ARCH_TAG}):${RESET}"
   echo -e "  • Target Install Dir : ${CYAN}${INSTALL_DIR}${RESET}"
   echo -e "  • Binary Symlinks    : ${CYAN}${BIN_DIR}${RESET}"
   echo -e "  • Antigravity Hub    : ${GREEN}$(get_installed_hub_version)${RESET}"
   echo -e "  • Antigravity IDE    : ${GREEN}$(get_installed_ide_version)${RESET}"
   echo ""
-  echo -e "${BOLD}Default Installer Versions:${RESET}"
-  echo -e "  • Hub Package URL    : ${DEFAULT_HUB_URL}"
-  echo -e "  • IDE Package URL    : ${DEFAULT_IDE_URL}"
+  echo -e "${BOLD}Resolved Package Source:${RESET} ${CYAN}${URL_SOURCE}${RESET}"
+  echo -e "  • Hub Download URL   : ${HUB_URL}"
+  echo -e "  • IDE Download URL   : ${IDE_URL}"
   echo ""
 }
 
@@ -283,7 +386,7 @@ install_hub() {
   local hub_stage="${TMP_DIR}/stage_hub"
   mkdir -p "${hub_stage}"
 
-  log_info "Downloading Antigravity Hub..."
+  log_info "Downloading Antigravity Hub from ${HUB_URL}..."
   curl -fsSL --retry 3 --connect-timeout 15 --progress-bar "${HUB_URL}" -o "${hub_tar}"
 
   log_info "Extracting Hub archive..."
@@ -353,7 +456,7 @@ install_ide() {
   local ide_stage="${TMP_DIR}/stage_ide"
   mkdir -p "${ide_stage}"
 
-  log_info "Downloading Antigravity IDE..."
+  log_info "Downloading Antigravity IDE from ${IDE_URL}..."
   curl -fsSL --retry 3 --connect-timeout 15 --progress-bar "${IDE_URL}" -o "${ide_tar}"
 
   log_info "Extracting IDE archive..."
@@ -542,6 +645,7 @@ check_root "$@"
 check_architecture
 check_running_processes
 ensure_dependencies
+resolve_urls
 
 TMP_DIR="$(mktemp -d /tmp/antigravity_installer.XXXXXX)"
 trap 'rm -rf "${TMP_DIR}"' EXIT

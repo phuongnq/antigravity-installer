@@ -40,15 +40,17 @@ sudo ./install_antigravity.sh
 
 ## 💡 What the Installer Does
 
-1. **Dependency Resolution**: Automatically verifies and installs core extraction tools (`curl`, `tar`, `python3`) across major Linux distributions (`apt`, `dnf`, `pacman`, `zypper`, `apk`).
-2. **Safe Staging**: Downloads and extracts the official releases of Antigravity Hub and Antigravity IDE to `/opt/antigravity`.
-3. **Sandbox Security**: Sets proper permissions (`4755 root:root`) for Electron `chrome-sandbox`.
-4. **CLI Symlinks**: Configures terminal commands in `/usr/local/bin`:
+1. **Live Release Discovery**: Automatically discovers and resolves the latest download links for your architecture directly from [https://antigravity.google/download](https://antigravity.google/download), with built-in fallbacks if offline.
+2. **Multi-Architecture Support**: Supports both Linux `x86_64` (`x64`) and `aarch64` (`ARM64`).
+3. **Dependency Resolution**: Automatically verifies and installs core extraction tools (`curl`, `tar`, `python3`) across major Linux distributions (`apt`, `dnf`, `pacman`, `zypper`, `apk`).
+4. **Safe Staging**: Downloads and extracts official releases of Antigravity Hub and Antigravity IDE to `/opt/antigravity`.
+5. **Sandbox Security**: Sets proper permissions (`4755 root:root`) for Electron `chrome-sandbox`.
+6. **CLI Symlinks**: Configures terminal commands in `/usr/local/bin`:
    - `agy` & `antigravity` → Antigravity Hub
    - `antigravity-ide` & `agy-ide` → Antigravity IDE CLI launcher
-5. **Desktop & Menu Launchers**: Registers `.desktop` files in `/usr/share/applications` with proper `StartupWMClass`, `GenericName`, and URL scheme handlers (`x-scheme-handler/antigravity`).
-6. **System Icons**: Extracts and installs high-resolution icons into `/usr/share/pixmaps` and `/usr/share/icons/hicolor/`.
-7. **Shell Auto-Completions**: Installs Bash and Zsh auto-completions for `antigravity-ide` and `agy-ide`.
+7. **Desktop & Menu Launchers**: Registers `.desktop` files in `/usr/share/applications` with proper `StartupWMClass`, `GenericName`, and URL scheme handlers (`x-scheme-handler/antigravity`).
+8. **System Icons**: Extracts and installs high-resolution icons into `/usr/share/pixmaps` and `/usr/share/icons/hicolor/`.
+9. **Shell Auto-Completions**: Installs Bash and Zsh auto-completions for `antigravity-ide` and `agy-ide`.
 
 ---
 
